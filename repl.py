@@ -1,5 +1,6 @@
 from collections import namedtuple
 import asyncio
+import sys
 
 
 class Repl:
@@ -8,10 +9,11 @@ class Repl:
     It could be controller by read() and write() interface.
     '''
 
-    Evaluator = namedtuple('Eval', 'cmd prompt')
+    Evaluator = namedtuple('Eval', 'cmd prompt quitcmd')
     _EVALS = {
-        'python' : Evaluator(['python'], '>>> '),  # note the space after '>>>'
-        'haskell' :  Evaluator(['ghci'], 'Prelude> '),
+        'python': Evaluator(['python'], '>>> ', 'quit()\n'),
+        'python3': Evaluator(['python3'], '>>> ', 'quit()\n'),
+        'haskell':  Evaluator(['ghci'], 'Prelude> ', ':quit\n'),
     }
 
     def __init__(self, lang):
@@ -19,7 +21,7 @@ class Repl:
 
         `lang` could be 'python','haskell', etc.
         '''
-        self.eval = self._EVALS[lang.lower()]
+        self.eval = self._EVALS.get(lang.lower())
         if not self.eval:
             raise TypeError('{} not supported'.format(lang))
 
@@ -30,13 +32,17 @@ class Repl:
                                                             stderr=asyncio.subprocess.PIPE)
 
     async def stop(self):
-        print('stdin', self.process.stdin)
-        self.process.stdin.write(':quit\n'.encode())
-        await self.process.stdin.drain()
-        # self.process.stdin.close()
-        await self.process.wait()
+        print(self.eval.quitcmd, end='')
+        await self.write(self.eval.quitcmd)
         self.std_f.cancel()
         self.err_f.cancel()
+        re = await self.process.communicate()
+        for i in re:
+            print(i.decode(), end='')
+
+    async def write(self, line):
+        self.process.stdin.write(line.encode())
+        await self.process.stdin.drain()
 
     async def readlines(self):
         '''generator to yield the lines
@@ -70,7 +76,7 @@ class Repl:
             for i in done:
                 yield i.result()
 
-    async def _read_line(self, stream , prompt, is_err):
+    async def _read_line(self, stream, prompt, is_err):
         ''' read a line from stream
 
         it returns either it reads \n or it matches prompt
@@ -82,23 +88,38 @@ class Repl:
             ch = ch.decode()
             line += ch
             if ch == '\n':  # it reads a newline
-                return is_err, line
+                return False, is_err, line
             if line == prompt:  # or it reads a prompt, e.g. '>>>'
-                return is_err, line
+                return True, is_err, line
+
+    async def print_until_idle(self):
+        async for is_idle, _, line in repl.readlines():
+            print(line, end='')
+            sys.stdout.flush()
+            if is_idle:
+                break
+        self.std_f.cancel()
+        self.err_f.cancel()
+
+
+async def run_cmd(repl, cmd):
+    print(cmd, end='')
+    await repl.write(cmd)
+    await repl.print_until_idle()
 
 
 async def server_lines(repl):
     await repl.start()
-    async for _, line in repl.readlines():
-        print(line)
-
+    await repl.print_until_idle()
+    await run_cmd(repl, '1+2\n')
+    await run_cmd(repl, 'show 12342\n')
 
 if __name__ == '__main__':
     loop = asyncio.get_event_loop()
     repl = Repl('haskell')
     try:
         loop.run_until_complete(server_lines(repl))
-    except KeyboardInterrupt:
+    except KeyboardInterrupt as e:
         pass
 
     loop.run_until_complete(repl.stop())
