@@ -18,7 +18,7 @@ class Repl:
         'haskell':  Evaluator(['ghci'], 'Prelude> ', ':quit\n'),
     }
 
-    def __init__(self, lang):
+    def __init__(self, loop, lang):
         '''Repl with specific language
 
         `lang` could be 'python','haskell', etc.
@@ -26,20 +26,24 @@ class Repl:
         self.eval = self._EVALS.get(lang.lower())
         if not self.eval:
             raise TypeError('{} not supported'.format(lang))
+        self.loop = loop
 
-    async def start(self):
-        self.process = await asyncio.create_subprocess_exec(
-            *self.eval.cmd,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE)
+    def start(self):
+        self.process = self.loop.run_until_complete(
+            asyncio.create_subprocess_exec(
+                *self.eval.cmd,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE))
+        self.loop.run_until_complete(self.print_until_idle())
 
-    async def stop(self):
+    def close(self):
         print(self.eval.quitcmd, end='')
-        await self.write(self.eval.quitcmd)
+        self.loop.run_until_complete(
+            self.write(self.eval.quitcmd))
         if self.pf:
             self.pf.cancel()
-        re = await self.process.communicate()
+        re = self.loop.run_until_complete(self.process.communicate())
         for i in re:
             print(i.decode(), end='')
 
