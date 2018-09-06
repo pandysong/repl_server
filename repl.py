@@ -2,6 +2,8 @@ from collections import namedtuple
 import asyncio
 import sys
 
+from parallel_future import ParallelFuture
+
 
 class Repl:
     '''Repl is a Python Wrapper over the evaluator
@@ -26,16 +28,17 @@ class Repl:
             raise TypeError('{} not supported'.format(lang))
 
     async def start(self):
-        self.process = await asyncio.create_subprocess_exec(*self.eval.cmd,
-                                                            stdin=asyncio.subprocess.PIPE,
-                                                            stdout=asyncio.subprocess.PIPE,
-                                                            stderr=asyncio.subprocess.PIPE)
+        self.process = await asyncio.create_subprocess_exec(
+            *self.eval.cmd,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE)
 
     async def stop(self):
         print(self.eval.quitcmd, end='')
         await self.write(self.eval.quitcmd)
-        self.std_f.cancel()
-        self.err_f.cancel()
+        if self.pf:
+            self.pf.cancel()
         re = await self.process.communicate()
         for i in re:
             print(i.decode(), end='')
@@ -50,31 +53,18 @@ class Repl:
         It will yield either it reads \n or it matches the prompt, e.g. '>>> '
         it return a tuple, the first parameter indicates it is error or not
         '''
-        def std_future():
-            return asyncio.ensure_future(self._read_line(self.process.stdout,
-                                                         self.eval.prompt,
-                                                         is_err=False))
-
-        def err_future():
-            return asyncio.ensure_future(self._read_line(self.process.stderr,
-                                                         self.eval.prompt,
-                                                         is_err=True))
-        self.std_f, self.err_f = None, None
-
-        def new_future(pending):
-            if self.std_f not in pending:
-                self.std_f = std_future()
-            if self.err_f not in pending:
-                self.err_f = err_future()
-            return set([self.std_f, self.err_f])
-
-        pending = set()
-
+        self.pf = ParallelFuture(
+            lambda : asyncio.ensure_future(
+                self._read_line(self.process.stdout,
+                                self.eval.prompt,
+                                is_err=False)),
+            lambda: asyncio.ensure_future(
+                self._read_line(self.process.stderr,
+                                self.eval.prompt,
+                                is_err=True)))
         while True:
-            pending = new_future(pending)
-            done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
-            for i in done:
-                yield i.result()
+            async for x in self.pf.wait():
+                yield x
 
     async def _read_line(self, stream, prompt, is_err):
         ''' read a line from stream
@@ -84,8 +74,7 @@ class Repl:
 
         line = ''
         while True:
-            ch = await stream.read(1)  # unbuffered reading
-            ch = ch.decode()
+            ch = (await stream.read(1)).decode()
             line += ch
             if ch == '\n':  # it reads a newline
                 return False, is_err, line
@@ -93,34 +82,9 @@ class Repl:
                 return True, is_err, line
 
     async def print_until_idle(self):
-        async for is_idle, _, line in repl.readlines():
+        async for is_idle, _, line in self.readlines():
             print(line, end='')
             sys.stdout.flush()
             if is_idle:
                 break
-        self.std_f.cancel()
-        self.err_f.cancel()
-
-
-async def run_cmd(repl, cmd):
-    print(cmd, end='')
-    await repl.write(cmd)
-    await repl.print_until_idle()
-
-
-async def server_lines(repl):
-    await repl.start()
-    await repl.print_until_idle()
-    await run_cmd(repl, '1+2\n')
-    await run_cmd(repl, 'show 12342\n')
-
-if __name__ == '__main__':
-    loop = asyncio.get_event_loop()
-    repl = Repl('haskell')
-    try:
-        loop.run_until_complete(server_lines(repl))
-    except KeyboardInterrupt as e:
-        pass
-
-    loop.run_until_complete(repl.stop())
-    loop.close()
+        self.pf.cancel()
