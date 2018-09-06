@@ -9,18 +9,17 @@ async def run_cmd(r, cmd):
 
 
 async def server_lines(r, loop):
-    await r.start()
-    await r.print_until_idle()
     await run_cmd(r, '1+2\n')
     await run_cmd(r, 'show 12342\n')
 
 if __name__ == '__main__':
     loop = asyncio.get_event_loop()
-    r = repl.Repl('haskell')
+    r = repl.Repl(loop, 'haskell')
+    r.start()
     try:
         loop.run_until_complete(server_lines(r, loop))
     except KeyboardInterrupt as e:
         pass
 
-    loop.run_until_complete(r.stop())
+    r.close()
     loop.close()
