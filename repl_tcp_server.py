@@ -15,17 +15,17 @@ class ReplTcpServer:
 
     def _handler(self):
         async def handle_tcp(reader, writer):
-            data = await reader.read(100)
-            message = data.decode()
-            addr = writer.get_extra_info('peername')
-            #print("Received %r from %r" % (message, addr))
+            while True:
+                data = await reader.read(100)
+                if not data:
+                    break
+                message = data.decode()
+                addr = writer.get_extra_info('peername')
 
-            message = await self.handler(message)
-            #print("Send: %r" % message)
-            writer.write(message.encode())
-            await writer.drain()
+                message = await self.handler(message)
+                writer.write(message.encode())
+                await writer.drain()
 
-            #print("Close the client socket")
             await asyncio.sleep(0.2)
             writer.close()
         return handle_tcp
