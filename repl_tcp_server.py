@@ -26,6 +26,7 @@ class ReplTcpServer:
             await writer.drain()
 
             #print("Close the client socket")
+            await asyncio.sleep(0.2)
             writer.close()
         return handle_tcp
 
