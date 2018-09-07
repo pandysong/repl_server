@@ -13,9 +13,9 @@ class Repl:
 
     Evaluator = namedtuple('Eval', 'cmd prompt quitcmd')
     _EVALS = {
-        'python': Evaluator(['python'], '>>> ', 'quit()\n'),
-        'python3': Evaluator(['python3'], '>>> ', 'quit()\n'),
-        'haskell':  Evaluator(['ghci'], 'Prelude> ', ':quit\n'),
+        'python': Evaluator(['python'], ['>>> '], 'quit()\n'),
+        'python3': Evaluator(['python3'], ['>>> '], 'quit()\n'),
+        'haskell':  Evaluator(['ghci'], ['Prelude> ', 'Prelude| '], ':quit\n'),
     }
 
     def __init__(self, loop, lang):
@@ -82,7 +82,7 @@ class Repl:
             line += ch
             if ch == '\n':  # it reads a newline
                 return False, is_err, line
-            if line == prompt:  # or it reads a prompt, e.g. '>>>'
+            if line in prompt:  # or it reads a prompt, e.g. '>>>'
                 return True, is_err, line
 
     async def print_until_idle(self):
